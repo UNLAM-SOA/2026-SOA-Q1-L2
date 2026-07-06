@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -21,9 +22,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.steeringwheel.presentation.viewmodel.MainViewModel
+import com.example.steeringwheel.presentation.viewmodel.SpeedViewModel
 import com.example.steeringwheel.ui.screens.DashboardScreen
 import com.example.steeringwheel.ui.screens.LogScreen
 import com.example.steeringwheel.ui.screens.SettingsScreen
+import com.example.steeringwheel.ui.screens.SpeedScreen
 import com.example.steeringwheel.ui.theme.SteeringWheelTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -41,6 +44,7 @@ class MainActivity : ComponentActivity() {
 
 sealed class Screen(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     object Dashboard : Screen("dashboard", "Dashboard", Icons.Default.Dashboard)
+    object Speed : Screen("speed", "Velocidad", Icons.Default.Speed)
     object Logs : Screen("logs", "Logs", Icons.Default.History)
     object Settings : Screen("settings", "Ajustes", Icons.Default.Settings)
 }
@@ -50,7 +54,7 @@ fun MainScreen() {
     val navController = rememberNavController()
     val viewModel: MainViewModel = hiltViewModel()
     
-    val items = listOf(Screen.Dashboard, Screen.Logs, Screen.Settings)
+    val items = listOf(Screen.Dashboard, Screen.Speed, Screen.Logs, Screen.Settings)
 
     Scaffold(
         bottomBar = {
@@ -85,6 +89,10 @@ fun MainScreen() {
                     onConnect = viewModel::connect,
                     onDisconnect = viewModel::disconnect
                 )
+            }
+            composable(Screen.Speed.route) {
+                val speedViewModel: SpeedViewModel = hiltViewModel()
+                SpeedScreen(viewModel = speedViewModel)
             }
             composable(Screen.Logs.route) {
                 val state by viewModel.dashboardState.collectAsState()

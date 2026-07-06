@@ -49,12 +49,11 @@
 
 // ========================== CONSTANTES ==========================
 // CAMBIAR ESTA CONSTANTE SI SE USA WOKWI O NO
+// (solo afecta la red WiFi; la API del buzzer se resuelve sola
+// en compilacion segun la version del core de Arduino-ESP32)
 const bool WOKWI = true;
-// WOKWI = FALSE 	-> VSCODE
-// WOKWI = TRUE 	-> WOKWI
-
-// ADEMÁS, modificar según se necesite la
-// configuración PWM buzzer en setup()
+// WOKWI = FALSE 	-> Hardware real
+// WOKWI = TRUE 	-> Simulador Wokwi
 
 // Pines (ESP32 DevKit V1)
 const int PIN_BUZZER = 33;
@@ -62,6 +61,7 @@ const int PIN_MOTOR_VIBRADOR = 27;
 const int PIN_FSR_IZQ = 34;
 const int PIN_FSR_DER = 35;
 const int PIN_VOLANTE = 4;
+const int PIN_VOLANTE_SIMULADO = 32; // pote que simula el AS5600 en Wokwi (ADC1, compatible con WiFi)
 
 // Buzzer
 const int BUZZER_OFF = 0;
@@ -103,15 +103,16 @@ int umbralMovimientoLeve = 20;
 int umbralMovimientoBrusco = 60;
 volatile bool gAlarmaSolicitada = false;
 
-int GaNGULOrEFERENCIA = 0;
+int gAnguloReferencia = 0;
 unsigned long gInicioVentanaMovimiento = 0;
 // Velocidad GPS recibida desde el celular
 volatile int gVelocidadGPS = 0; // velocidad actual en km/h (actualizada por MQTT)
 int umbralVelocidad = 10;		// umbral de velocidad en km/h (por debajo se ignoran maniobras)
 
 // Wifi y MQTT
-const char *ssid = "MOVISTARWIFI8165";
-const char *password = "1234dani";
+// En Wokwi la unica red disponible es "Wokwi-GUEST" (sin password)
+const char *ssid = WOKWI ? "Wokwi-GUEST" : "MOVISTARWIFI8165";
+const char *password = WOKWI ? "" : "1234dani";
 
 const char *MQTT_SERVER = "broker.emqx.io";
 const int MQTT_PORT = 1883;
@@ -195,6 +196,8 @@ void irAlertaFuerte();
 void irAlarmaCelular();
 void irError();
 String generarJsonSensores();
+void conectarWiFi();
+void conectarMQTT();
 
 typedef void (*transition)();
 
@@ -209,6 +212,8 @@ int gValorVolanteAnterior = 0;
 unsigned long gLastControlTick = 0;
 unsigned long gStateEntryTick = 0;
 unsigned long gUnaManoDesde = 0;
+unsigned long gTimeoutEstado = 0; // Duracion del timeout del estado actual (0 = sin timeout). Lo configura cada funcion de transicion al entrar al estado
+bool gDummyPendiente = false;	  // El proximo evento debe ser EV_DUMMY. Lo levanta irInit() al entrar a ST_INIT
 
 // Matriz de transición de estados
 transition state_table[MAX_STATES][MAX_EVENTS] =
@@ -232,6 +237,26 @@ void setearLed(bool encendido)
 void enviarBuzzer(int modo)
 {
 	xQueueOverwrite(buzzerQueue, &modo);
+}
+
+// La API de PWM cambio en el core v3 de Arduino-ESP32 (usa el pin directo);
+// en el core v2 (PlatformIO) se usa el canal. Se resuelve en compilacion.
+void buzzerTono(int freq)
+{
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+	ledcWriteTone(PIN_BUZZER, freq);
+#else
+	ledcWriteTone(BUZZER_CHANNEL, freq);
+#endif
+}
+
+void buzzerSilencio()
+{
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+	ledcWrite(PIN_BUZZER, 0);
+#else
+	ledcWrite(BUZZER_CHANNEL, 0);
+#endif
 }
 
 void apagarBuzzer()
@@ -260,6 +285,8 @@ void irInit()
 	setearLed(false); // Apagar motor vibrador
 	current_state = ST_INIT;
 	gStateEntryTick = millis();
+	gTimeoutEstado = 0;
+	gDummyPendiente = true; // el proximo evento sera EV_DUMMY para salir de ST_INIT
 	if (client.connected())
 		client.publish(TOPIC_ESTADO, "INIT");
 }
@@ -270,6 +297,7 @@ void irDetectando()
 	setearLed(false); // Apagar motor vibrador
 	current_state = ST_DETECTANDO;
 	gStateEntryTick = millis();
+	gTimeoutEstado = 0;
 	if (client.connected())
 		client.publish(TOPIC_ESTADO, "DETECTANDO");
 }
@@ -280,6 +308,7 @@ void irAlertaLeve()
 	emitirNotaLeve();
 	current_state = ST_ALERTA_LEVE;
 	gStateEntryTick = millis();
+	gTimeoutEstado = UMBRAL_TIMEOUT_ALERTA;
 	if (client.connected())
 		client.publish(TOPIC_ESTADO, "ALERTA_LEVE");
 }
@@ -290,6 +319,7 @@ void irAlertaFuerte()
 	emitirCancionFuerte();
 	current_state = ST_ALERTA_FUERTE;
 	gStateEntryTick = millis();
+	gTimeoutEstado = UMBRAL_TIMEOUT_ALERTA;
 	if (client.connected())
 		client.publish(TOPIC_ESTADO, "ALERTA_FUERTE");
 }
@@ -300,6 +330,7 @@ void irAlarmaCelular()
 	emitirCancionFuerte();
 	current_state = ST_ALARMA_CELULAR;
 	gStateEntryTick = millis();
+	gTimeoutEstado = UMBRAL_TIMEOUT_ALERTA;
 	if (client.connected())
 		client.publish(TOPIC_ESTADO, "ALARMA_CELULAR");
 }
@@ -310,6 +341,7 @@ void irError()
 	emitirCancionFuerte();
 	current_state = ST_ERROR;
 	gStateEntryTick = millis();
+	gTimeoutEstado = UMBRAL_TIMEOUT_ERROR;
 	if (client.connected())
 		client.publish(TOPIC_ESTADO, "ERROR");
 }
@@ -338,7 +370,9 @@ void actualizarLecturas()
 	// Lectura de sensores
 	gLectura.fsrIzq = analogRead(PIN_FSR_IZQ);
 	gLectura.fsrDer = analogRead(PIN_FSR_DER);
-	if (ams5600.detectMagnet() == 1)
+	if (WOKWI) // en Wokwi el volante se simula con un pote (no hay AS5600)
+		gLectura.volante = map(analogRead(PIN_VOLANTE_SIMULADO), 0, 4095, 0, 360);
+	else if (ams5600.detectMagnet() == 1)
 		gLectura.volante = Angle();
 	unsigned long ahora = millis();
 	// Calculo de diferencia de volante respecto a lectura anterior
@@ -370,6 +404,18 @@ void actualizarLecturas()
 events get_new_event()
 {
 	unsigned long ct = millis();
+
+	// Evento dummy pendiente (arranque desde ST_INIT)
+	if (gDummyPendiente)
+	{
+		gDummyPendiente = false;
+		return EV_DUMMY;
+	}
+
+	// Timeout del estado actual (la duracion la configuro cada funcion de transicion al entrar al estado)
+	if (gTimeoutEstado > 0 && (ct - gStateEntryTick) >= gTimeoutEstado)
+		return EV_TIMEOUT;
+
 	unsigned long diferencia = ct - gLastControlTick;
 
 	// Timeout de control para evitar procesar eventos muy seguidos
@@ -413,39 +459,11 @@ events get_new_event()
 	return EV_CONT;
 }
 
-events get_fsm_event()
-{
-	unsigned long ct = millis();
-
-	switch (current_state)
-	{
-	case ST_INIT:
-		return EV_DUMMY;
-
-	case ST_ALERTA_LEVE:
-	case ST_ALERTA_FUERTE:
-	case ST_ALARMA_CELULAR:
-		if ((ct - gStateEntryTick) >= UMBRAL_TIMEOUT_ALERTA)
-			return EV_TIMEOUT;
-		break;
-
-	case ST_ERROR:
-		if ((ct - gStateEntryTick) >= UMBRAL_TIMEOUT_ERROR)
-			return EV_TIMEOUT;
-		break;
-
-	default:
-		break;
-	}
-
-	return get_new_event();
-}
-
 // Principal
 // Maquina de estados para deteccion de manos en volante con eventos segun lecturas de sensores y estado actual
 void maquina_estados_deteccion_manos()
 {
-	new_event = get_fsm_event();
+	new_event = get_new_event();
 
 	if ((new_event >= 0) && (new_event < MAX_EVENTS) && (current_state >= 0) && (current_state < MAX_STATES))
 	{
@@ -495,53 +513,20 @@ void buzzer_task(void *pv)
 		switch (buzzer_mode)
 		{
 		case BUZZER_OFF: // Apagado
-			if (!WOKWI)
-			{
-				// Esta configuración es para VS Code:
-				ledcWrite(BUZZER_CHANNEL, 0);
-				vTaskDelay(pdMS_TO_TICKS(BUZZER_DELAY_OFF));
-			}
-			else
-			{
-
-				// Esta configuración es para Wokwi
-				ledcWrite(PIN_BUZZER, 0);
-				vTaskDelay(pdMS_TO_TICKS(BUZZER_DELAY_OFF));
-			}
+			buzzerSilencio();
+			vTaskDelay(pdMS_TO_TICKS(BUZZER_DELAY_OFF));
 			break;
 
 		case BUZZER_INTERMITENTE: // Intermitente (ST_ALERTA_LEVE)
-			if (!WOKWI)
-			{
-				// Esta configuración es para VS Code:
-				ledcWriteTone(BUZZER_CHANNEL, FREQ_ALERTA);
-				vTaskDelay(pdMS_TO_TICKS(BUZZER_DELAY_ON)); // 300ms ON
-				ledcWrite(BUZZER_CHANNEL, 0);
-				vTaskDelay(pdMS_TO_TICKS(BUZZER_DELAY_ON)); // 300ms OFF
-			}
-			else
-			{
-				// Esta configuración es para Wokwi:
-				ledcWriteTone(PIN_BUZZER, FREQ_ALERTA);
-				vTaskDelay(pdMS_TO_TICKS(BUZZER_DELAY_ON)); // 300ms ON
-				ledcWrite(PIN_BUZZER, 0);
-				vTaskDelay(pdMS_TO_TICKS(BUZZER_DELAY_ON)); // 300ms OFF
-			}
+			buzzerTono(FREQ_ALERTA);
+			vTaskDelay(pdMS_TO_TICKS(BUZZER_DELAY_ON)); // 300ms ON
+			buzzerSilencio();
+			vTaskDelay(pdMS_TO_TICKS(BUZZER_DELAY_ON)); // 300ms OFF
 			break;
 
 		case BUZZER_CONTINUO: // Continuo (ST_ALERTA_FUERTE)
-			if (!WOKWI)
-			{
-				// Esta configuración es para VS Code:
-				ledcWriteTone(BUZZER_CHANNEL, FREQ_EMERGENCIA);
-				vTaskDelay(pdMS_TO_TICKS(BUZZER_DELAY_CONTINUO)); // Simplemente mantenerlo encendido
-			}
-			else
-			{
-				// Esta configuración es para Wokwi:
-				ledcWriteTone(PIN_BUZZER, FREQ_EMERGENCIA);
-				vTaskDelay(pdMS_TO_TICKS(BUZZER_DELAY_CONTINUO)); // Simplemente mantenerlo encendido
-			}
+			buzzerTono(FREQ_EMERGENCIA);
+			vTaskDelay(pdMS_TO_TICKS(BUZZER_DELAY_CONTINUO)); // Simplemente mantenerlo encendido
 			break;
 		}
 	}
@@ -717,21 +702,14 @@ void setup()
 	pinMode(PIN_BUZZER, OUTPUT);
 	pinMode(PIN_MOTOR_VIBRADOR, OUTPUT);
 
-	// Configuracion PWM buzzer
-	if (WOKWI)
-	{
-		// Esta configuración es para Wokwi:
-		ledcAttach(PIN_BUZZER, FREQ_ALERTA, BUZZER_RESOLUTION);
-		ledcWrite(PIN_BUZZER, 0);
-	}
-	else
-	{
-		// Esta configuración es para VS Code:
-		// ledcSetup(BUZZER_CHANNEL, FREQ_ALERTA, BUZZER_RESOLUTION);
-		// ledcAttachPin(PIN_BUZZER, BUZZER_CHANNEL);
-		// ledcWrite(BUZZER_CHANNEL, 0);
-		// comentado porque tira error de compilacion en arduino IDE, pero funciona igual. Se puede probar en VS Code con PlatformIO
-	}
+	// Configuracion PWM buzzer (la API depende de la version del core, se elige en compilacion)
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+	ledcAttach(PIN_BUZZER, FREQ_ALERTA, BUZZER_RESOLUTION);
+#else
+	ledcSetup(BUZZER_CHANNEL, FREQ_ALERTA, BUZZER_RESOLUTION);
+	ledcAttachPin(PIN_BUZZER, BUZZER_CHANNEL);
+#endif
+	buzzerSilencio();
 
 	// FreeRTOS
 	// Crear cola para prender y apagar el buzzer desde la FSM
@@ -748,7 +726,14 @@ void setup()
 	gLastControlTick = millis();
 	gStateEntryTick = gLastControlTick;
 
-	if (ams5600.detectMagnet() == 1)
+	if (WOKWI)
+	{
+		pinMode(PIN_VOLANTE_SIMULADO, INPUT);
+		gLectura.volante = map(analogRead(PIN_VOLANTE_SIMULADO), 0, 4095, 0, 360);
+		gAnguloReferencia = gLectura.volante;
+		gValorVolanteAnterior = gLectura.volante;
+	}
+	else if (ams5600.detectMagnet() == 1)
 	{
 		gLectura.volante = Angle();
 		gAnguloReferencia = gLectura.volante;

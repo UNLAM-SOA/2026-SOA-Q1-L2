@@ -58,7 +58,7 @@
       "id": "text5",
       "top": -9.6,
       "left": 364.8,
-      "attrs": { "text": "AS5600" }
+      "attrs": { "text": "Volante (AS5600 simulado)" }
     },
     {
       "type": "wokwi-text",
@@ -98,12 +98,12 @@
     [ "pot1:VCC", "bb1:bp.15", "red", [ "v19.2", "h37.6", "v-123.9" ] ],
     [ "pot2:VCC", "bb1:bp.45", "red", [ "v19.2", "h37.6", "v-123.9" ] ],
     [ "pot3:VCC", "bb1:bp.26", "red", [ "v0" ] ],
-    [ "pot2:SIG", "esp:D34", "green", [ "v28.8", "h-58", "v-96", "h-172.8", "v57.8" ] ],
-    [ "pot1:SIG", "esp:D33", "green", [ "v28.8", "h57.2", "v-9.6" ] ],
-    [ "pot3:SIG", "esp:D35", "green", [ "v57.6", "h-67.6", "v96.4" ] ],
-    [ "bz2:2", "esp:D21", "green", [ "v364.8", "h-202", "v-66.8" ] ],
+    [ "pot2:SIG", "esp:D35", "green", [ "v28.8", "h-58", "v-96", "h-172.8", "v57.8" ] ],
+    [ "pot1:SIG", "esp:D34", "green", [ "v28.8", "h57.2", "v-9.6" ] ],
+    [ "pot3:SIG", "esp:D32", "green", [ "v57.6", "h-67.6", "v96.4" ] ],
+    [ "bz2:2", "esp:D33", "green", [ "v364.8", "h-202", "v-66.8" ] ],
     [ "bb1:tn.12", "r1:1", "black", [ "v0" ] ],
-    [ "esp:D32", "led1:A", "green", [ "h0" ] ],
+    [ "esp:D27", "led1:A", "green", [ "h0" ] ],
     [ "pot3:GND", "bb1:31b.j", "", [ "$bb" ] ],
     [ "pot3:SIG", "bb1:32b.j", "", [ "$bb" ] ],
     [ "pot3:VCC", "bb1:33b.j", "", [ "$bb" ] ],

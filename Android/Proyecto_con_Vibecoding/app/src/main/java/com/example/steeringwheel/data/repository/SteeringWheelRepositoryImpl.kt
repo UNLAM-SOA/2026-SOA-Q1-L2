@@ -38,4 +38,8 @@ class SteeringWheelRepositoryImpl @Inject constructor(
         sendCommand("UMBRAL_LEVE:$light")
         sendCommand("UMBRAL_BRUSCO:$sharp")
     }
+
+    override suspend fun setSpeedThreshold(threshold: Int) {
+        sendCommand("UMBRAL_VELOCIDAD:$threshold")
+    }
 }

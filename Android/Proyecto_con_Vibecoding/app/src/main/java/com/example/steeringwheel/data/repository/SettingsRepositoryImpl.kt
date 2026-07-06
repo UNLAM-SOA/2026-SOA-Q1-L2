@@ -24,6 +24,7 @@ class SettingsRepositoryImpl @Inject constructor(
         val BROKER = stringPreferencesKey("mqtt_broker")
         val PORT = intPreferencesKey("mqtt_port")
         val CLIENT_ID = stringPreferencesKey("mqtt_client_id")
+        val SPEED_THRESHOLD = intPreferencesKey("speed_threshold")
     }
 
     override fun getMqttSettings(): Flow<MqttSettings> {
@@ -41,6 +42,18 @@ class SettingsRepositoryImpl @Inject constructor(
             preferences[PreferencesKeys.BROKER] = settings.broker
             preferences[PreferencesKeys.PORT] = settings.port
             preferences[PreferencesKeys.CLIENT_ID] = settings.clientId
+        }
+    }
+
+    override fun getSpeedThreshold(): Flow<Int> {
+        return context.dataStore.data.map { preferences ->
+            preferences[PreferencesKeys.SPEED_THRESHOLD] ?: 10
+        }
+    }
+
+    override suspend fun updateSpeedThreshold(threshold: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.SPEED_THRESHOLD] = threshold
         }
     }
 }

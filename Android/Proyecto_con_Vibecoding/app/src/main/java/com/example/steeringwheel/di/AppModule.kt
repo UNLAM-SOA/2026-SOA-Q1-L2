@@ -2,8 +2,10 @@ package com.example.steeringwheel.di
 
 import android.content.Context
 import com.example.steeringwheel.data.mqtt.MqttManager
+import com.example.steeringwheel.data.repository.LocationRepositoryImpl
 import com.example.steeringwheel.data.repository.SettingsRepositoryImpl
 import com.example.steeringwheel.data.repository.SteeringWheelRepositoryImpl
+import com.example.steeringwheel.domain.repository.LocationRepository
 import com.example.steeringwheel.domain.repository.SettingsRepository
 import com.example.steeringwheel.domain.repository.SteeringWheelRepository
 import dagger.Module
@@ -29,4 +31,10 @@ object AppModule {
         mqttManager: MqttManager,
         settingsRepository: SettingsRepository
     ): SteeringWheelRepository = SteeringWheelRepositoryImpl(mqttManager, settingsRepository)
+
+    @Provides
+    @Singleton
+    fun provideLocationRepository(
+        @ApplicationContext context: Context
+    ): LocationRepository = LocationRepositoryImpl(context)
 }

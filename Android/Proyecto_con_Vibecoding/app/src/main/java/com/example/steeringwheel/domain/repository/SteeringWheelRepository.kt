@@ -13,4 +13,5 @@ interface SteeringWheelRepository {
     suspend fun disconnect()
     suspend fun sendCommand(command: String)
     suspend fun setThresholds(hand: Int, light: Int, sharp: Int)
+    suspend fun setSpeedThreshold(threshold: Int)
 }
